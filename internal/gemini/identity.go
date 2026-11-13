@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"context"
 	"encoding/binary"
 	"math/bits"
 	"strconv"
@@ -77,6 +78,49 @@ func applyChromeHeaders(req *http.Request, language string, google bool) {
 		req.Header.Set(name, value)
 	}
 	req.Header.Set("x-sec-ch-ua-not-a-border", notABorder(time.Now()))
+	if identity, ok := req.Context().Value(browserIdentityKey{}).(map[string]string); ok {
+		for name, value := range identity {
+			req.Header.Set(name, value)
+		}
+		// A queued request may cross the five-minute identity window. Finalize
+		// the dynamic marker at send time using the policy's actual User-Agent.
+		req.Header.Set("x-sec-ch-ua-not-a-border", notABorderWithUA(time.Now(), req.Header.Get("user-agent")))
+	}
+}
+
+type browserIdentityKey struct{}
+
+// WithBrowserIdentity accepts only public browser identity fields, never credentials
+// or model-routing extensions. Contexts keep simultaneous account requests isolated.
+func WithBrowserIdentity(ctx context.Context, headers map[string]string) context.Context {
+	allowed := BrowserIdentityHeaders("157.0.8103.40", time.Now())
+	safe := map[string]string{}
+	for name, value := range headers {
+		name = strings.ToLower(name)
+		if _, ok := allowed[name]; ok && len(value) <= 1024 && !strings.ContainsAny(value, "\r\n") {
+			safe[name] = value
+		}
+	}
+	return context.WithValue(ctx, browserIdentityKey{}, safe)
+}
+
+// BrowserIdentityHeaders exposes the upstream Chrome identity to policy plugins.
+// No cookies, authorization or per-account material enter this map.
+func BrowserIdentityHeaders(version string, now time.Time) map[string]string {
+	major := strings.Split(version, ".")[0]
+	ua := strings.Replace(ChromeUserAgent, "Chrome/157.0.0.0", "Chrome/"+major+".0.0.0", 1)
+	result := map[string]string{"user-agent": ua}
+	for k, v := range chromeLowEntropyHints {
+		result[k] = v
+	}
+	for k, v := range chromeGoogleHeaders {
+		result[k] = v
+	}
+	result["sec-ch-ua"] = `"Not-A.Brand";v="99", "Google Chrome";v="` + major + `", "Chromium";v="` + major + `"`
+	result["sec-ch-ua-full-version"] = `"` + version + `"`
+	result["sec-ch-ua-full-version-list"] = `"Not-A.Brand";v="99.0.0.0", "Google Chrome";v="` + version + `", "Chromium";v="` + version + `"`
+	result["x-sec-ch-ua-not-a-border"] = notABorderWithUA(now, ua)
+	return result
 }
 
 // chromeAPIKey 是 Chrome 稳定版内置的 Google API key，参与 x-sec-ch-ua-not-a-border 的计算
@@ -87,6 +131,10 @@ const notABorderSeed = "f369e73779169d07"
 
 // notABorder 按 Chrome 的 GetCompaneroValue 返回 x-sec-ch-ua-not-a-border：以种子的四个大端字为状态，依次逐字节吸收 API key、User-Agent 与 Unix 毫秒除以 300000 的十进制字符串，再把四个字按小端逐字节、低半字节在前映射到 qazwsxedcrfvtgby
 func notABorder(now time.Time) string {
+	return notABorderWithUA(now, ChromeUserAgent)
+}
+
+func notABorderWithUA(now time.Time, userAgent string) string {
 	state := [4]uint32{}
 	for index := range state {
 		state[index] = binary.BigEndian.Uint32([]byte(notABorderSeed[index*4 : index*4+4]))
@@ -103,7 +151,7 @@ func notABorder(now time.Time) string {
 		}
 	}
 	absorb(chromeAPIKey)
-	absorb(ChromeUserAgent)
+	absorb(userAgent)
 	absorb(strconv.FormatInt(now.UnixMilli()/300000, 10))
 	const alphabet = "qazwsxedcrfvtgby"
 	out := make([]byte, 0, 32)

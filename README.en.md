@@ -1,5 +1,7 @@
 # Gemini-Web2API (Go Version)
 
+This fork includes a [native CPA plugin](plugin/cpa/README.md) that reuses this repository's protocol adapters and account pool behind an explicit `gemini-web/` model prefix.
+
 [简体中文](README.md) | [English](README.en.md)
 
 Convert Google Gemini Web into OpenAI, Claude, and Gemini compatible APIs.

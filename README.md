@@ -4,6 +4,8 @@
 
 将 Google Gemini Web 网页版转换为 OpenAI、Claude 和 Gemini 兼容 API。
 
+本 fork 新增 [CPA 原生插件](plugin/cpa/README.md)：通过 `gemini-web/` 前缀接入，支持多账号管理和按模型能力分流。网页插件 v0.2.1 还可配合独立的 `web-gemini-identity` 身份头插件，仅作用于网页 Gemini 模型。
+
 ## 特性
 
 - **OpenAI 兼容**：`/v1/chat/completions`、`/v1/completions`、`/v1/responses`、`/v1/files`、`/v1/audio/*`、`/v1/videos`、`/v1/models`

@@ -1,0 +1,116 @@
+# Gemini Web 原生 CPA 插件
+
+基于本仓库当前的网页协议、账号管理器和 API adapters 编译为原生共享库。插件 ID 为 `dadahhhh-gemini-web`，当前版本 `0.2.1`，目标宿主为支持动态插件的 **CLIProxyAPI v8.0.67**（C ABI v1，schema v10）。
+
+## 支持范围
+
+- 对话：OpenAI Chat Completions、Responses、Claude Messages、Gemini Native。
+- 实时 SSE：使用内存管道逐块传递，保持原始字节和背压，CPA 关闭流后取消后端读取。
+- Cookie / StorageState 导入、账号启停与删除、初始化重试、Cookie 轮换、账号并发与冷却调度均复用本仓库实现。
+- 管理面板提供导入和状态查看；操作接口由 CPA 管理密钥保护，公开资源路由只提供静态页面。
+- 默认仅路由 `gemini-web/` 前缀；没有导入账号时可手动启用访客会话。
+- 不启动独立服务进程或监听端口，不需要 Python、Node 或浏览器运行时。
+
+**首版不承诺完整覆盖独立服务的所有 HTTP 端点。** 文件、语音、视频任务轮询等独立端点没有注册进 CPA；对话请求内部的附件处理仍由上游 adapter 决定。未实现 CPA OAuth 一键登录或原生配额面板，也不把网页 Cookie 写进 CPA 的 Antigravity 认证文件。
+
+## 构建
+
+在仓库根目录执行：
+
+```sh
+cd plugin/cpa
+go mod download
+go test ./...
+CGO_ENABLED=1 go build -buildvcs=false -buildmode=c-shared -o dist/dadahhhh-gemini-web.so .
+```
+
+建议 Go 1.27.4 与 GCC。Linux ARM64、macOS 和 Windows 需在对应平台使用 C 编译器构建。此目录是独立 Go module，使用 `replace ../..` 引用本仓库，不给独立应用增加 CPA SDK 依赖。不要单独复制此目录后构建。
+
+## 安装
+
+先备份 CPA 配置与插件目录。把构建产物放入 `plugins/linux/amd64/dadahhhh-gemini-web.so`，然后合并配置：
+
+```yaml
+plugins:
+  enabled: true
+  dir: plugins
+  configs:
+    dadahhhh-gemini-web:
+      enabled: true
+      data_dir: /CLIProxyAPI/gemini-web-data
+      proxy: http://your-proxy:7890
+      guest_enabled: false
+      model_prefix: gemini-web/
+      per_account_concurrency: 1
+      routing_strategy: round-robin
+      request_timeout: 30m
+```
+
+Docker 需要把 `data_dir` 挂载到持久目录。该目录保存浏览器凭证与请求账本，应仅允许服务用户读写。相同目录只能由一个插件实例使用。`proxy` 是独立的网页端出口配置，按实际网络填写；不要直接套用 Antigravity 域名规则。
+
+重启 CPA 后，从插件资源菜单打开“Gemini 网页账号”，或打开 `/v0/resource/plugins/dadahhhh-gemini-web/accounts`。在页面内输入 CPA **管理密钥**，再导入 Google Cookie 或 StorageState。密钥不存储到浏览器持久存储中。账号状态接口位于 `/v0/management/plugins/dadahhhh-gemini-web/status`。
+
+`0.1.1` 修复了 Cookie 导入缺少账号 ID 和 Cookie JSON 被误当作 StorageState 的问题。现在可以直接粘贴或选择文件，自动识别 Cookie Header、扩展导出的 Cookie JSON 数组、StorageState 和 Netscape 格式；账号名称可留空自动生成。复制时被 Markdown 转义的 Cookie 名称也会还原，Cookie 值保持原样。
+
+导入返回“已保存”后，会异步验证 Google 会话；只有状态变为 `ready` 才表示可以参与调用。页面分别提示格式错误、管理密钥错误、会话失效、地区或服务条款限制。重新导出 Cookie 前，请先在 Gemini 官网确认该账号可以对话；网页模型权限与 API 模型权限分别决定。
+
+初始化后查询插件管理接口 `/models` 获取账号发现的模型；CPA 注册时还会提供少量带前缀的启动目录。目录展示不代表该账号拥有对应模型权限。新发现模型可以通过前缀直接请求；重载插件会刷新 CPA 展示目录。
+
+## 多账号管理（0.2.0）
+
+管理页面列出各账号的就绪状态、最近使用时间、进行中的请求、支持模型和冷却期限。每行可以更新凭证、启用、停用、重新验证或删除账号。状态可每 5 秒刷新；管理密钥和导入内容不会存入浏览器持久存储。
+
+- **新增与更新分开**：新增成功后清空账号名。新增同名账号或重复会话会明确报错，避免把第二个账号覆盖到第一个；更新请点击对应账号的“更新凭证”，沿用原有启停状态和固定代理。
+- **批量文件导入**：一次选择最多 10 份 Cookie / StorageState 文件，每份文件代表一个账号；逐项返回保存结果，单项失败不影响其他项。批量接口 `/import-batch` 接受 `{"accounts":[{"material":"..."}]}`，总请求限制 4 MiB，仅允许新增。
+- **同一浏览器多个 Google 账号**：逐个导入时，可填写官网 `/u/0/`、`/u/1/` 对应的账号序号。自动账号 ID 会区分序号；原生 StorageState 内的 `geminiWeb2api.authUser` 也会保留。序号必须对应浏览器内真实登录账号，不能凭空创建账号。
+- **分流**：默认 `round-robin`，无会话绑定的新请求在支持目标模型的可用账号间轮询；也可在 CPA 配置中使用 `fill-first`。冷却、停用或不支持目标模型的账号不会接收新请求。同一会话优先沿用原账号；能否重试到其他账号取决于上游错误和会话约束，已发出的流式内容不会拼接另一账号回答。
+
+每个账号独立持久化保存，默认每账号并发 1。不自动扩大任何账号的模型权限或额度。多账号共享同一出口时，出口 IP 限制可能同时影响它们。
+
+## 独立网页身份插件（网页插件需 0.2.1+）
+
+`web-gemini-identity` 是独立的原生 CPA 请求拦截插件。只匹配 `gemini-web/gemini-*` 和 `web/gemini-*`；不匹配无网页前缀的 Gemini、Antigravity、GPT 或 Claude。第二个前缀需要执行器另行配置支持，身份插件本身不创建模型别名。
+
+```sh
+cd plugin/cpa
+CGO_ENABLED=1 go build -buildvcs=false -trimpath -buildmode=c-shared -o dist/web-gemini-identity.so ./identity
+```
+
+把它放入 CPA 的 `plugins/linux/amd64/`，与网页执行器并列安装，然后加入：
+
+```yaml
+plugins:
+  configs:
+    web-gemini-identity:
+      enabled: true
+      chrome_version: 157.0.8103.40
+```
+
+身份插件生成 Chrome User-Agent、匹配的 `sec-ch-ua*`、`x-browser-*` 和随时间计算的 `x-sec-ch-ua-not-a-border`。它通过专用内部信封传到网页执行器；执行器将白名单字段按请求上下文应用到 Google 请求，不把内部信封发往 Google。账号同时调用时不会修改共享全局身份。
+
+Cookie、Authorization、Google 动态模型选择 `x-goog-ext-*`、Origin/Referer 和 TLS/HTTP2 保留在网页协议层。TLS 当前沿用上游 `Chrome_152` 配置；修改浏览器版本不会自动替换 TLS 指纹。禁用独立插件后，网页执行器恢复上游默认身份，不删除网页协议所需的基础请求头。
+
+可以单独启停此插件。状态接口 `/v0/management/plugins/web-gemini-identity/status` 由 CPA 管理密钥保护，提供当前浏览器版本与拦截次数；网页执行器状态包含 `identity_policy_applications`，表示收到有效策略信封的执行次数。计数不等于模型成功次数。
+
+身份算法来源：[上游 identity.go](https://github.com/Mag1cFall/Gemini-Web2API/blob/77ed59cd9a4b7d611a2ef26e66b689619c1bba97/internal/gemini/identity.go)。这些浏览器身份字段不会绕过模型权限、账号额度或出口 IP 限制。
+
+调用示例：
+
+```sh
+curl http://your-cpa:8317/v1/chat/completions \
+  -H 'Authorization: Bearer YOUR_CPA_API_KEY' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gemini-web/gemini-3.5-flash-lite","messages":[{"role":"user","content":"你好"}],"stream":true}'
+```
+
+示例模型需以 `/models` 实际返回的目录为准。`gemini-3.8-flash-high` 等原有无前缀模型继续按 CPA 原配置处理。具体网页模型、权限与额度由登录账号决定。非流式执行受 `request_timeout` 限制；C ABI 不提供通用的即时客户端取消通知，非流式断开可能继续运行到后端结束或超时。
+
+## 验证与发布
+
+`go test ./...` 检查协议路由、前缀隔离、凭证边界、SSE 增量传递、取消释放、管理页面与无效导入。`tests/abi_smoke.py` 可对共享库运行真实 C ABI 加载、注册、调用和释放检查。GitHub Actions 会生成 Linux amd64 构建包。
+
+自动测试不使用真实 Google Cookie。成功加载插件和通过本地测试，不等于已验证某个 Google 账号的付费模型、图片或工具能力。
+
+## 致谢
+
+网页协议、浏览器指纹、调度与 API 转换来自 Mag1cFall/Gemini-Web2API（MIT）。CPA C ABI 声明与接口来自 router-for-me/CLIProxyAPI（MIT）。本适配层由 dadahhhh fork 维护；不依赖其他第三方 Gemini Web CPA 插件。

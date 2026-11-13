@@ -1,0 +1,45 @@
+name: CPA Native Plugin
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['plugin/cpa/**', 'internal/**', 'go.mod', 'go.sum', '.github/workflows/cpa-plugin.yml']
+  pull_request:
+    paths: ['plugin/cpa/**', 'internal/**', 'go.mod', 'go.sum', '.github/workflows/cpa-plugin.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  linux-amd64:
+    runs-on: ubuntu-24.04
+    # Debian 12 keeps the artifact compatible with the CPA Docker image's GLIBC.
+    container: golang:1.27.4-bookworm
+    defaults:
+      run:
+        working-directory: plugin/cpa
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install ABI test runtime
+        run: apt-get update && apt-get install -y --no-install-recommends python3 nodejs
+      - name: Test plugin and account lifecycle
+        run: |
+          go test -race -count=1 ./...
+          go test github.com/Mag1cFall/Gemini-Web2API/internal/accounts
+          go test -race github.com/Mag1cFall/Gemini-Web2API/internal/gemini
+          node tests/panel_smoke.mjs
+      - name: Build native plugin
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=1 go build -buildvcs=false -trimpath -buildmode=c-shared -o dist/dadahhhh-gemini-web.so .
+          CGO_ENABLED=1 go build -buildvcs=false -trimpath -buildmode=c-shared -o dist/web-gemini-identity.so ./identity
+          python3 tests/abi_smoke.py dist/dadahhhh-gemini-web.so
+          python3 tests/identity_abi_smoke.py dist/web-gemini-identity.so
+          cp README.md NOTICE LICENSE.CPA ../../LICENSE dist/
+          (cd dist && sha256sum dadahhhh-gemini-web.so web-gemini-identity.so > SHA256SUMS)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dadahhhh-gemini-web-0.2.1-with-identity-linux-amd64
+          path: plugin/cpa/dist/
+          retention-days: 30
