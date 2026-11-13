@@ -3,7 +3,7 @@ name: CPA Native Plugin
 on:
   workflow_dispatch:
   push:
-    branches: [main, 'codex/cpa-native-plugin']
+    branches: [main]
     paths: ['plugin/cpa/**', 'internal/**', 'go.mod', 'go.sum', '.github/workflows/cpa-plugin.yml']
   pull_request:
     paths: ['plugin/cpa/**', 'internal/**', 'go.mod', 'go.sum', '.github/workflows/cpa-plugin.yml']
@@ -30,7 +30,7 @@ jobs:
       - name: Build native plugin
         run: |
           mkdir -p dist
-          CGO_ENABLED=1 go build -trimpath -buildmode=c-shared -o dist/dadahhhh-gemini-web.so .
+          CGO_ENABLED=1 go build -buildvcs=false -trimpath -buildmode=c-shared -o dist/dadahhhh-gemini-web.so .
           python3 tests/abi_smoke.py dist/dadahhhh-gemini-web.so
           cp README.md NOTICE LICENSE.CPA ../../LICENSE dist/
           (cd dist && sha256sum dadahhhh-gemini-web.so > SHA256SUMS)

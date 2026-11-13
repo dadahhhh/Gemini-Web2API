@@ -21,7 +21,7 @@
 cd plugin/cpa
 go mod download
 go test ./...
-CGO_ENABLED=1 go build -buildmode=c-shared -o dist/dadahhhh-gemini-web.so .
+CGO_ENABLED=1 go build -buildvcs=false -buildmode=c-shared -o dist/dadahhhh-gemini-web.so .
 ```
 
 建议 Go 1.27.4 与 GCC。Linux ARM64、macOS 和 Windows 需在对应平台使用 C 编译器构建。此目录是独立 Go module，使用 `replace ../..` 引用本仓库，不给独立应用增加 CPA SDK 依赖。不要单独复制此目录后构建。
