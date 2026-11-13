@@ -1,6 +1,6 @@
 # Gemini Web 原生 CPA 插件
 
-基于本仓库当前的网页协议、账号管理器和 API adapters 编译为原生共享库。插件 ID 为 `dadahhhh-gemini-web`，当前版本 `0.2.0`，目标宿主为支持动态插件的 **CLIProxyAPI v8.0.67**（C ABI v1，schema v10）。
+基于本仓库当前的网页协议、账号管理器和 API adapters 编译为原生共享库。插件 ID 为 `dadahhhh-gemini-web`，当前版本 `0.2.1`，目标宿主为支持动态插件的 **CLIProxyAPI v8.0.67**（C ABI v1，schema v10）。
 
 ## 支持范围
 
@@ -66,6 +66,33 @@ Docker 需要把 `data_dir` 挂载到持久目录。该目录保存浏览器凭�
 - **分流**：默认 `round-robin`，无会话绑定的新请求在支持目标模型的可用账号间轮询；也可在 CPA 配置中使用 `fill-first`。冷却、停用或不支持目标模型的账号不会接收新请求。同一会话优先沿用原账号；能否重试到其他账号取决于上游错误和会话约束，已发出的流式内容不会拼接另一账号回答。
 
 每个账号独立持久化保存，默认每账号并发 1。不自动扩大任何账号的模型权限或额度。多账号共享同一出口时，出口 IP 限制可能同时影响它们。
+
+## 独立网页身份插件（网页插件需 0.2.1+）
+
+`web-gemini-identity` 是独立的原生 CPA 请求拦截插件。只匹配 `gemini-web/gemini-*` 和 `web/gemini-*`；不匹配无网页前缀的 Gemini、Antigravity、GPT 或 Claude。第二个前缀需要执行器另行配置支持，身份插件本身不创建模型别名。
+
+```sh
+cd plugin/cpa
+CGO_ENABLED=1 go build -buildvcs=false -trimpath -buildmode=c-shared -o dist/web-gemini-identity.so ./identity
+```
+
+把它放入 CPA 的 `plugins/linux/amd64/`，与网页执行器并列安装，然后加入：
+
+```yaml
+plugins:
+  configs:
+    web-gemini-identity:
+      enabled: true
+      chrome_version: 157.0.8103.40
+```
+
+身份插件生成 Chrome User-Agent、匹配的 `sec-ch-ua*`、`x-browser-*` 和随时间计算的 `x-sec-ch-ua-not-a-border`。它通过专用内部信封传到网页执行器；执行器将白名单字段按请求上下文应用到 Google 请求，不把内部信封发往 Google。账号同时调用时不会修改共享全局身份。
+
+Cookie、Authorization、Google 动态模型选择 `x-goog-ext-*`、Origin/Referer 和 TLS/HTTP2 保留在网页协议层。TLS 当前沿用上游 `Chrome_152` 配置；修改浏览器版本不会自动替换 TLS 指纹。禁用独立插件后，网页执行器恢复上游默认身份，不删除网页协议所需的基础请求头。
+
+可以单独启停此插件。状态接口 `/v0/management/plugins/web-gemini-identity/status` 由 CPA 管理密钥保护，提供当前浏览器版本与拦截次数；网页执行器状态包含 `identity_policy_applications`，表示收到有效策略信封的执行次数。计数不等于模型成功次数。
+
+身份算法来源：[上游 identity.go](https://github.com/Mag1cFall/Gemini-Web2API/blob/77ed59cd9a4b7d611a2ef26e66b689619c1bba97/internal/gemini/identity.go)。这些浏览器身份字段不会绕过模型权限、账号额度或出口 IP 限制。
 
 调用示例：
 

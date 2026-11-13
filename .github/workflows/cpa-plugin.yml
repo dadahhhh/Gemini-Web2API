@@ -27,16 +27,19 @@ jobs:
         run: |
           go test -race -count=1 ./...
           go test github.com/Mag1cFall/Gemini-Web2API/internal/accounts
+          go test -race github.com/Mag1cFall/Gemini-Web2API/internal/gemini
           node tests/panel_smoke.mjs
       - name: Build native plugin
         run: |
           mkdir -p dist
           CGO_ENABLED=1 go build -buildvcs=false -trimpath -buildmode=c-shared -o dist/dadahhhh-gemini-web.so .
+          CGO_ENABLED=1 go build -buildvcs=false -trimpath -buildmode=c-shared -o dist/web-gemini-identity.so ./identity
           python3 tests/abi_smoke.py dist/dadahhhh-gemini-web.so
+          python3 tests/identity_abi_smoke.py dist/web-gemini-identity.so
           cp README.md NOTICE LICENSE.CPA ../../LICENSE dist/
-          (cd dist && sha256sum dadahhhh-gemini-web.so > SHA256SUMS)
+          (cd dist && sha256sum dadahhhh-gemini-web.so web-gemini-identity.so > SHA256SUMS)
       - uses: actions/upload-artifact@v7
         with:
-          name: dadahhhh-gemini-web-0.2.0-linux-amd64
+          name: dadahhhh-gemini-web-0.2.1-with-identity-linux-amd64
           path: plugin/cpa/dist/
           retention-days: 30

@@ -6,18 +6,40 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Mag1cFall/Gemini-Web2API/internal/gemini"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginabi"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
 const maxResponseBytes = 64 << 20
+
+const browserIdentityHeader = "X-Cpa-Web-Gemini-Identity"
+
+var identityApplied atomic.Uint64
+
+func browserIdentityContext(ctx context.Context, headers http.Header) context.Context {
+	raw := headers.Get(browserIdentityHeader)
+	if raw == "" || len(raw) > 16<<10 {
+		return ctx
+	}
+	var profile struct {
+		Version int               `json:"version"`
+		Headers map[string]string `json:"headers"`
+	}
+	if json.Unmarshal([]byte(raw), &profile) != nil || profile.Version != 1 {
+		return ctx
+	}
+	identityApplied.Add(1)
+	return gemini.WithBrowserIdentity(ctx, profile.Headers)
+}
 
 func requestFor(c Config, in pluginapi.ExecutorRequest, count bool) (*http.Request, error) {
 	model, ok := strings.CutPrefix(in.Model, c.ModelPrefix)
@@ -153,6 +175,7 @@ func (r *Runtime) execute(in pluginapi.ExecutorRequest, count bool) (pluginapi.E
 	}
 	ctx, cancel := context.WithTimeout(r.ctx, duration(r.cfg.RequestTimeout))
 	defer cancel()
+	ctx = browserIdentityContext(ctx, in.Headers)
 	result, err := servePipe(ctx, r.handler, req)
 	if err != nil {
 		return pluginapi.ExecutorResponse{}, err
@@ -176,6 +199,7 @@ func (r *Runtime) stream(in pluginapi.ExecutorRequest, emit func([]byte) error) 
 	}
 	ctx, cancel := context.WithTimeout(r.ctx, duration(r.cfg.RequestTimeout))
 	defer cancel()
+	ctx = browserIdentityContext(ctx, in.Headers)
 	result, err := servePipe(ctx, r.handler, req)
 	if err != nil {
 		return err

@@ -10,7 +10,7 @@ import (
 )
 
 const pluginID = "dadahhhh-gemini-web"
-const version = "0.2.0"
+const version = "0.2.1"
 
 type Config struct {
 	Enabled               bool   `yaml:"enabled"`

@@ -4,7 +4,7 @@
 
 将 Google Gemini Web 网页版转换为 OpenAI、Claude 和 Gemini 兼容 API。
 
-本 fork 新增 [CPA 原生插件](plugin/cpa/README.md)：直接复用本仓库协议与账号调度，在 CLIProxyAPI 中通过 `gemini-web/` 前缀接入。插件 v0.2.0 提供多账号列表、批量导入、凭证更新与启停管理，并按模型能力和账号状态分流。
+本 fork 新增 [CPA 原生插件](plugin/cpa/README.md)：通过 `gemini-web/` 前缀接入，支持多账号管理和按模型能力分流。网页插件 v0.2.1 还可配合独立的 `web-gemini-identity` 身份头插件，仅作用于网页 Gemini 模型。
 
 ## 特性
 

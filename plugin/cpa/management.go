@@ -124,6 +124,7 @@ func (r *Runtime) statusView() any {
 	}
 	sort.Slice(views, func(i, j int) bool { return views[i]["id"].(string) < views[j]["id"].(string) })
 	out := map[string]any{"enabled": true, "model_prefix": r.cfg.ModelPrefix, "version": version, "routing_strategy": r.cfg.RoutingStrategy, "per_account_concurrency": r.cfg.PerAccountConcurrency, "cooling_down": s.CoolingDown, "disabled": s.Disabled, "total": s.Total, "available": s.Available, "accounts": views}
+	out["identity_policy_applications"] = identityApplied.Load()
 	if s.Guest != nil {
 		out["guest"] = map[string]any{"state": s.Guest.State, "models": s.Guest.Models}
 	}
