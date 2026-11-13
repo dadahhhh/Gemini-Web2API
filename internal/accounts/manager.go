@@ -96,15 +96,40 @@ func (m *Manager) Settings() Settings {
 
 // Start 登记并启动全部账号与访客会话，返回后首轮初始化全部结束
 func (m *Manager) Start(accounts []auth.LoadedAccount) {
+	m.StartWithGuest(accounts, true)
+}
+
+// StartWithGuest lets embedded hosts opt out of anonymous network sessions.
+// Start retains its original behavior for the standalone server.
+func (m *Manager) StartWithGuest(accounts []auth.LoadedAccount, guest bool) {
 	var wait sync.WaitGroup
 	for _, account := range accounts {
 		wait.Add(1)
 		m.launch(account, wait.Done)
 	}
-	wait.Add(1)
-	m.launchGuest(wait.Done)
+	if guest {
+		wait.Add(1)
+		m.launchGuest(wait.Done)
+	}
 	wait.Wait()
 	go m.watchProxies()
+}
+
+// Wait waits for account workers after the owning context has been canceled.
+// Call after Start/StartWithGuest returns, with no concurrent account imports.
+func (m *Manager) Wait() {
+	m.mu.Lock()
+	var done []<-chan struct{}
+	for _, entry := range m.accounts {
+		if entry.done != nil {
+			done = append(done, entry.done)
+		}
+	}
+	m.mu.Unlock()
+	m.stopGuest()
+	for _, ch := range done {
+		<-ch
+	}
 }
 
 // guestReloadInterval 是访客会话重读首页与模型目录的间隔，与账号的默认轮换间隔相同
