@@ -1,5 +1,5 @@
 """Load both native plugins in disposable CPA; no Google credentials or host ports."""
-import json,pathlib,secrets,subprocess,tempfile,time,urllib.request,urllib.error,sys
+import json,pathlib,secrets,subprocess,tempfile,time,urllib.request,urllib.error,sys,sqlite3
 dist=pathlib.Path(__file__).resolve().parents[1]/'dist'
 image=sys.argv[1] if len(sys.argv)>1 else 'codex-cpa:v8.0.67-headfix.1'
 def docker(*args):return subprocess.check_output(['docker',*args],text=True,stderr=subprocess.PIPE).strip()
@@ -49,6 +49,10 @@ with tempfile.TemporaryDirectory(prefix='cpa-identity-smoke-') as temp:
   disabledBaseline=web['identity_policy_applications']
   request('/v1/chat/completions',{'model':'gemini-web/gemini-4-hydrogen','messages':[{'role':'user','content':'synthetic disabled test'}]})
   _,web=request(webRoute);assert web['identity_policy_applications']==disabledBaseline,'Disabled identity policy still ran'
-  print(json.dumps({'pass':True,'bothNativePluginsLoaded':True,'policyReachedExecutor':True,'nonWebUnaffected':True,'independentDisableVerified':True,'googleRequestsSent':False,'hostPortsPublished':False}))
+  time.sleep(.5)
+  ledger=sqlite3.connect('file:'+str(root/'web-data/requests.db')+'?mode=ro',uri=True)
+  count=ledger.execute('select count(*) from requests').fetchone()[0];ledger.close()
+  assert count>=2,'Identity request accounting was lost'
+  print(json.dumps({'pass':True,'bothNativePluginsLoaded':True,'policyReachedExecutor':True,'nonWebUnaffected':True,'independentDisableVerified':True,'requestRecords':count,'googleRequestsSent':False,'hostPortsPublished':False}))
  finally:
   if cid:docker('rm','-f',cid)
