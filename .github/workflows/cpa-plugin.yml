@@ -22,11 +22,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install ABI test runtime
-        run: apt-get update && apt-get install -y --no-install-recommends python3
+        run: apt-get update && apt-get install -y --no-install-recommends python3 nodejs
       - name: Test plugin and account lifecycle
         run: |
           go test -race -count=1 ./...
           go test github.com/Mag1cFall/Gemini-Web2API/internal/accounts
+          node tests/panel_smoke.mjs
       - name: Build native plugin
         run: |
           mkdir -p dist
@@ -36,6 +37,6 @@ jobs:
           (cd dist && sha256sum dadahhhh-gemini-web.so > SHA256SUMS)
       - uses: actions/upload-artifact@v7
         with:
-          name: dadahhhh-gemini-web-0.1.1-linux-amd64
+          name: dadahhhh-gemini-web-0.2.0-linux-amd64
           path: plugin/cpa/dist/
           retention-days: 30

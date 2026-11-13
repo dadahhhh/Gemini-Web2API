@@ -217,7 +217,7 @@ func (r *Runtime) models() []pluginapi.ModelInfo {
 	}
 	// Bootstrap entries allow explicit routing before account discovery finishes.
 	if len(ids) == 0 {
-		for _, id := range []string{"gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-4-carbon", "gemini-4-argon"} {
+		for _, id := range []string{"gemini-4-hydrogen", "gemini-3.5-flash-lite", "gemini-4-carbon", "gemini-4-argon"} {
 			ids[id] = "Account availability is checked by Gemini Web"
 		}
 	}

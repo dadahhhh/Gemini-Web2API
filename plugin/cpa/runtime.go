@@ -29,6 +29,7 @@ type Runtime struct {
 	cancel      context.CancelFunc
 	initialized chan struct{}
 	mu          sync.Mutex
+	accountMu   sync.Mutex
 	closed      bool
 	active      sync.WaitGroup
 }

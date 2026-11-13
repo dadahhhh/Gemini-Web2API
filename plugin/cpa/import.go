@@ -5,6 +5,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Mag1cFall/Gemini-Web2API/internal/auth"
@@ -27,6 +30,7 @@ func normalizeImport(body []byte) (auth.StorageState, string, error) {
 		Cookie   string          `json:"cookie"`
 		State    json.RawMessage `json:"storage_state"`
 		ID       string          `json:"id"`
+		AuthUser *int            `json:"auth_user"`
 	}
 	var state auth.StorageState
 	if len(body) > 4<<20 {
@@ -80,6 +84,12 @@ func normalizeImport(body []byte) (auth.StorageState, string, error) {
 		return state, "", invalidImport("invalid_cookie_material", "Cookie 格式无效，支持 Cookie Header、Cookie 数组和 StorageState")
 	}
 	state.Cookies = cookies
+	if request.AuthUser != nil {
+		state.Metadata.AuthUser = *request.AuthUser
+	}
+	if state.Metadata.AuthUser < 0 || state.Metadata.AuthUser > 99 {
+		return state, "", invalidImport("invalid_auth_user", "Google 账号序号需在 0 到 99 之间")
+	}
 	chosen := request.ID
 	if chosen == "" {
 		chosen = state.Metadata.ID
@@ -90,14 +100,7 @@ func normalizeImport(body []byte) (auth.StorageState, string, error) {
 			return state, "", invalidImport("invalid_account_id", "账号名称需包含英文字母或数字，也可以留空自动生成")
 		}
 	} else {
-		identity := ""
-		for _, c := range cookies {
-			if c.Name == "__Secure-1PSID" {
-				identity = c.Value
-				break
-			}
-		}
-		sum := sha256.Sum256([]byte(identity))
+		sum := sha256.Sum256([]byte(sessionIdentity(state)))
 		state.Metadata.ID = "web-" + hex.EncodeToString(sum[:6])
 	}
 	if state.Metadata.Source.Browser == "" {
@@ -112,6 +115,96 @@ func normalizeImport(body []byte) (auth.StorageState, string, error) {
 	return state, format, nil
 }
 
+// Include the Google account index, so one browser session can hold distinct accounts.
+func sessionIdentity(state auth.StorageState) string {
+	for _, c := range state.Cookies {
+		if c.Name == "__Secure-1PSID" {
+			if state.Metadata.AuthUser == 0 {
+				return c.Value
+			}
+			return fmt.Sprintf("%s|authuser=%d", c.Value, state.Metadata.AuthUser)
+		}
+	}
+	return ""
+}
+
+type savedImport struct {
+	ID      string `json:"id"`
+	Format  string `json:"format"`
+	State   string `json:"state"`
+	Message string `json:"message"`
+}
+
+// Caller holds accountMu across duplicate checks and persistence.
+func (r *Runtime) importOne(body []byte) (savedImport, error) {
+	var result savedImport
+	state, format, err := normalizeImport(body)
+	if err != nil {
+		return result, err
+	}
+	var options struct {
+		Mode     string `json:"mode"`
+		AuthUser *int   `json:"auth_user"`
+	}
+	_ = json.Unmarshal(body, &options)
+	if options.Mode == "" {
+		options.Mode = "upsert"
+	} // Preserve the v0.1 management API.
+	if options.Mode != "create" && options.Mode != "update" && options.Mode != "upsert" {
+		return result, invalidImport("invalid_mode", "请选择新增账号或更新已有账号")
+	}
+	authdir := filepath.Join(r.cfg.DataDir, "auth")
+	target := filepath.Join(authdir, state.Metadata.ID, "storage-state.json")
+	_, statErr := os.Stat(target)
+	exists := statErr == nil
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return result, statErr
+	}
+	if options.Mode == "create" && exists {
+		return result, invalidImport("account_exists", "账号已存在，请在列表中选择更新凭证")
+	}
+	if options.Mode == "update" && !exists {
+		return result, invalidImport("account_missing", "待更新账号不存在，请刷新账号列表")
+	}
+	if exists && options.AuthUser == nil && state.Metadata.AuthUser == 0 {
+		raw, err := os.ReadFile(target)
+		if err != nil {
+			return result, err
+		}
+		var old auth.StorageState
+		if json.Unmarshal(raw, &old) != nil {
+			return result, errors.New("invalid stored account")
+		}
+		state.Metadata.AuthUser = old.Metadata.AuthUser
+	}
+	paths, err := filepath.Glob(filepath.Join(authdir, "*", "storage-state.json"))
+	if err != nil {
+		return result, err
+	}
+	for _, p := range paths {
+		if p == target {
+			continue
+		}
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			return result, err
+		}
+		var other auth.StorageState
+		if json.Unmarshal(raw, &other) != nil {
+			return result, errors.New("invalid stored account")
+		}
+		if sessionIdentity(other) == sessionIdentity(state) {
+			return result, invalidImport("duplicate_session", "这份 Google 会话已导入，请更新已有账号，不要重复添加")
+		}
+	}
+	encoded, _ := json.Marshal(state)
+	id, err := r.manager.ImportState(encoded)
+	if err != nil {
+		return result, err
+	}
+	return savedImport{ID: id, Format: format, State: "initializing", Message: "账号已保存，正在验证 Google 会话，请刷新状态"}, nil
+}
+
 func publicImportError(err error) any {
 	var typed *importFailure
 	if errors.As(err, &typed) {
@@ -121,6 +214,9 @@ func publicImportError(err error) any {
 }
 
 func sessionHint(raw string) string {
+	if strings.Contains(raw, "出口 IP") {
+		return "Google 暂时限制当前出口 IP，请等待恢复或检查网页出口"
+	}
 	for code, message := range map[string]string{"(1040)": "需要在 Gemini 官网同意最新服务条款", "(1042)": "服务条款已更新，请在 Gemini 官网重新同意", "(1054)": "账号访问被家长或监护人阻止", "(1057)": "账号访问需要家长或监护人批准", "(1060)": "当前出口地区不支持 Gemini", "(1014)": "Google 暂时限制该账号访问", "(1021)": "Google 拒绝了该账号的访问"} {
 		if strings.Contains(raw, code) {
 			return message
