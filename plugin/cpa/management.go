@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	_ "embed"
 	"encoding/json"
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
@@ -46,29 +45,16 @@ func (r *Runtime) management(raw []byte) (pluginapi.ManagementResponse, error) {
 		if len(req.Body) > 4<<20 {
 			return jsonManagement(413, map[string]string{"error": "account import exceeds 4 MiB"}), nil
 		}
-		var body struct {
-			Cookie string          `json:"cookie"`
-			State  json.RawMessage `json:"storage_state"`
-			ID     string          `json:"id"`
-		}
-		if json.Unmarshal(req.Body, &body) != nil {
-			return jsonManagement(400, map[string]string{"error": "invalid import body"}), nil
-		}
-		var id string
-		var err error
-		ctx, cancel := context.WithTimeout(r.ctx, duration(r.cfg.InitTimeout))
-		defer cancel()
-		if len(body.State) > 0 && string(body.State) != "null" {
-			id, err = r.manager.ImportState(body.State)
-		} else if strings.TrimSpace(body.Cookie) != "" {
-			id, err = r.manager.ImportCookie(ctx, body.Cookie, body.ID, "", 0)
-		} else {
-			return jsonManagement(400, map[string]string{"error": "cookie or storage_state is required"}), nil
-		}
+		state, format, err := normalizeImport(req.Body)
 		if err != nil {
-			return jsonManagement(400, map[string]string{"error": "account import failed; verify cookies, storage state and proxy"}), nil
+			return jsonManagement(400, map[string]any{"error": publicImportError(err)}), nil
 		}
-		return jsonManagement(200, map[string]string{"id": id}), nil
+		encoded, _ := json.Marshal(state)
+		id, err := r.manager.ImportState(encoded)
+		if err != nil {
+			return jsonManagement(400, map[string]any{"error": publicImportError(err)}), nil
+		}
+		return jsonManagement(200, map[string]string{"id": id, "format": format, "state": "initializing", "message": "账号已保存，正在验证 Google 会话，请刷新状态"}), nil
 	case req.Method == "POST" && route == "account":
 		var body struct {
 			ID     string `json:"id"`
@@ -103,7 +89,7 @@ func (r *Runtime) statusView() any {
 	s := r.pool.Status()
 	views := []map[string]any{}
 	for _, a := range s.Accounts {
-		views = append(views, map[string]any{"id": a.AccountID, "state": a.State, "enabled": a.Enabled, "tier": a.Tier, "models": a.Models, "pending": a.Pending, "cooldown_until": a.CooldownUntil})
+		views = append(views, map[string]any{"id": a.AccountID, "state": a.State, "enabled": a.Enabled, "tier": a.Tier, "models": a.Models, "pending": a.Pending, "cooldown_until": a.CooldownUntil, "hint": sessionHint(a.LastError)})
 	}
 	out := map[string]any{"enabled": true, "model_prefix": r.cfg.ModelPrefix, "total": s.Total, "available": s.Available, "accounts": views}
 	if s.Guest != nil {

@@ -9,6 +9,12 @@ import (
 	"github.com/Mag1cFall/Gemini-Web2API/internal/auth"
 )
 
+// ParseCookieMaterial validates supported browser exports without logging cookie values.
+// This is shared by embedded integrations and the standalone cookie importer.
+func ParseCookieMaterial(input string) ([]auth.StateCookie, error) {
+	return parseCookies(input)
+}
+
 // parseCookies 解析 Cookie Header、浏览器扩展导出的 JSON 或 Netscape cookies.txt，只保留 google.com 及其子域的 Cookie
 func parseCookies(input string) ([]auth.StateCookie, error) {
 	text := strings.TrimSpace(strings.TrimPrefix(input, string(rune(0xFEFF))))
@@ -26,8 +32,10 @@ func parseCookies(input string) ([]auth.StateCookie, error) {
 		return nil, err
 	}
 	names := make(map[string]bool, len(cookies))
-	for _, cookie := range cookies {
-		names[cookie.Name] = true
+	for index := range cookies {
+		// Markdown often escapes cookie-name underscores. Never alter the value.
+		cookies[index].Name = strings.ReplaceAll(cookies[index].Name, `\_`, `_`)
+		names[cookies[index].Name] = true
 	}
 	for _, required := range []string{"SAPISID", "__Secure-1PSID"} {
 		if !names[required] {

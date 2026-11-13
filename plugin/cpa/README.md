@@ -1,6 +1,6 @@
 # Gemini Web 原生 CPA 插件
 
-基于本仓库当前的网页协议、账号管理器和 API adapters 编译为原生共享库。插件 ID 为 `dadahhhh-gemini-web`，首版 `0.1.0`，目标宿主为支持动态插件的 **CLIProxyAPI v8.0.67**（C ABI v1，schema v10）。
+基于本仓库当前的网页协议、账号管理器和 API adapters 编译为原生共享库。插件 ID 为 `dadahhhh-gemini-web`，当前版本 `0.1.1`，目标宿主为支持动态插件的 **CLIProxyAPI v8.0.67**（C ABI v1，schema v10）。
 
 ## 支持范围
 
@@ -50,6 +50,10 @@ Docker 需要把 `data_dir` 挂载到持久目录。该目录保存浏览器凭�
 
 重启 CPA 后，从插件资源菜单打开“Gemini 网页账号”，或打开 `/v0/resource/plugins/dadahhhh-gemini-web/accounts`。在页面内输入 CPA **管理密钥**，再导入 Google Cookie 或 StorageState。密钥不存储到浏览器持久存储中。账号状态接口位于 `/v0/management/plugins/dadahhhh-gemini-web/status`。
 
+`0.1.1` 修复了 Cookie 导入缺少账号 ID 和 Cookie JSON 被误当作 StorageState 的问题。现在可以直接粘贴或选择文件，自动识别 Cookie Header、扩展导出的 Cookie JSON 数组、StorageState 和 Netscape 格式；账号名称可留空自动生成。复制时被 Markdown 转义的 Cookie 名称也会还原，Cookie 值保持原样。
+
+导入返回“已保存”后，会异步验证 Google 会话；只有状态变为 `ready` 才表示可以参与调用。页面分别提示格式错误、管理密钥错误、会话失效、地区或服务条款限制。重新导出 Cookie 前，请先在 Gemini 官网确认该账号可以对话；网页模型权限与 API 模型权限分别决定。
+
 初始化后查询插件管理接口 `/models` 获取账号发现的模型；CPA 注册时还会提供少量带前缀的启动目录。目录展示不代表该账号拥有对应模型权限。新发现模型可以通过前缀直接请求；重载插件会刷新 CPA 展示目录。
 
 调用示例：
@@ -58,10 +62,10 @@ Docker 需要把 `data_dir` 挂载到持久目录。该目录保存浏览器凭�
 curl http://your-cpa:8317/v1/chat/completions \
   -H 'Authorization: Bearer YOUR_CPA_API_KEY' \
   -H 'Content-Type: application/json' \
-  -d '{"model":"gemini-web/gemini-3.8-flash","messages":[{"role":"user","content":"你好"}],"stream":true}'
+  -d '{"model":"gemini-web/gemini-3.5-flash-lite","messages":[{"role":"user","content":"你好"}],"stream":true}'
 ```
 
-`gemini-3.8-flash-high` 等原有无前缀模型继续按 CPA 原配置处理。具体网页模型、权限与额度由登录账号决定。非流式执行受 `request_timeout` 限制；C ABI 不提供通用的即时客户端取消通知，非流式断开可能继续运行到后端结束或超时。
+示例模型需以 `/models` 实际返回的目录为准。`gemini-3.8-flash-high` 等原有无前缀模型继续按 CPA 原配置处理。具体网页模型、权限与额度由登录账号决定。非流式执行受 `request_timeout` 限制；C ABI 不提供通用的即时客户端取消通知，非流式断开可能继续运行到后端结束或超时。
 
 ## 验证与发布
 
